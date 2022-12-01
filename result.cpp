@@ -5,7 +5,7 @@
 constexpr int MAX_SIZE = 10;
 constexpr int ROOT = 0;
  
-void merge(int* a, int* b,int start, int middle, int end) {
+void merge(int* a, int* b, int start, int middle, int end) {
     int na1, na2, nb, i;
     na1 = start;
     nb = start;
@@ -18,7 +18,6 @@ void merge(int* a, int* b,int start, int middle, int end) {
             b[nb++] = a[na2++];
         }
     }
- 
     if (na1 <= middle) {
         for (i = na1; i <= middle; i++) {
             b[nb++] = a[i];
@@ -29,7 +28,6 @@ void merge(int* a, int* b,int start, int middle, int end) {
             b[nb++] = a[i];
         }
     }
- 
     for (i = start; i <= end; i++) {
         a[i] = b[i];
     }
@@ -82,20 +80,18 @@ void prepareData(int *random_array, int current_rank) {
         printArray(random_array);
     }
 }
- 
-// Вместо этого метода можно использовать метод
-// MPI_Bcast(random_array, MAX_SIZE, MPI_INT, root, MPI_COMM_WORLD);
-// Он сделает то же самое
-void broadcastArray(int current_rank, int comm_sz, int *random_array) { 
-    if (current_rank ==	0) { //	Process	#0	broadcast	to	all	processes	with	MPI_Send()	and	MPI_Recv()
-        prepareData(random_array, current_rank);
-        for	(int dest =	1; dest	< comm_sz; dest++){	
-            MPI_Send(random_array, MAX_SIZE, MPI_INT, dest,	0, MPI_COMM_WORLD);	
-        }	
-    } else { //	Receive	from rank #0		
-        MPI_Recv(random_array, MAX_SIZE, MPI_INT, 0, 0,	MPI_COMM_WORLD,	MPI_STATUS_IGNORE);	
-    }	
+
+void lastSort(int current_rank, int* result) {
+    // Последний вызов сортировки
+    if (current_rank == ROOT) {
+        int last_tmp[MAX_SIZE];
+        mergeSort(result, last_tmp, 0, MAX_SIZE - 1);
+        std::cout << "Sorted array:\n";
+        printArray(result);
+    }
 }
+
+
 
 int main(int argc, char **argv) {
     // Инициализация параллельной части программы
@@ -107,14 +103,25 @@ int main(int argc, char **argv) {
     communicate(&comm_sz, &current_rank);
 
     int random_array[MAX_SIZE];
-    // Отсылаем массив с рандомными значениями всем процессам
-    broadcastArray(current_rank, comm_sz, random_array);
-    // Вычисляем размер массивов, которые мы отдадим каждому процессу.
+    prepareData(random_array, current_rank);
+    // Заполняем и отсылаем массив (если мы на процессе root)
+    // с рандомными значениями всем процессам
     int size = MAX_SIZE / comm_sz;
-    // Массив, который будет использован каждым процессом
     int sub[size];
-    // Распределяем все элементы массива по процессам
-    MPI_Scatter(random_array, size, MPI_INT, sub, size, MPI_INT, 0, MPI_COMM_WORLD); 
+    MPI_Status status;
+
+    if (current_rank == ROOT) {
+        for (int i = 0; i < size; i++) {
+            sub[i] = random_array[i];
+        }
+        for (int i = ROOT + 1; i < comm_sz; i++) {
+            MPI_Send(random_array + size * i, 
+            size, MPI_INT, i, 0, MPI_COMM_WORLD);
+        }
+    } else {
+        MPI_Recv(sub, size, MPI_INT, ROOT, 0, MPI_COMM_WORLD, &status);
+    }
+
 
     // Временный массив, который нужен для сортировки слиянием
     int tmp[size];
@@ -127,15 +134,7 @@ int main(int argc, char **argv) {
     }
     // Собрать все массивы, отсортированные процессами, в один 
     MPI_Gather(sub, size, MPI_INT, result, size, MPI_INT, 0, MPI_COMM_WORLD);
- 
-    // Последний вызов сортировки
-    if (current_rank == 0) {
-        int last_tmp[MAX_SIZE];
-        mergeSort(result, last_tmp, 0, MAX_SIZE - 1);
-        std::cout << "Sorted array:\n";
-        printArray(result);
-    }
-
+    lastSort(current_rank, result);
     MPI_Finalize();
     return 0;
 }
