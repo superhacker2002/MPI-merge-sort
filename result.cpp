@@ -91,7 +91,20 @@ void lastSort(int current_rank, int* result) {
     }
 }
 
-
+void scatterData(int current_rank, int size, int comm_sz, int* random_array, int* sub) {
+    MPI_Status status;
+    if (current_rank == ROOT) {
+        for (int i = 0; i < size; i++) {
+            sub[i] = random_array[i];
+        }
+        for (int i = ROOT + 1; i < comm_sz; i++) {
+            MPI_Send(random_array + size * i, 
+            size, MPI_INT, i, 0, MPI_COMM_WORLD);
+        }
+    } else {
+        MPI_Recv(sub, size, MPI_INT, ROOT, 0, MPI_COMM_WORLD, &status);
+    }
+}
 
 int main(int argc, char **argv) {
     // Инициализация параллельной части программы
@@ -108,19 +121,7 @@ int main(int argc, char **argv) {
     // с рандомными значениями всем процессам
     int size = MAX_SIZE / comm_sz;
     int sub[size];
-    MPI_Status status;
-
-    if (current_rank == ROOT) {
-        for (int i = 0; i < size; i++) {
-            sub[i] = random_array[i];
-        }
-        for (int i = ROOT + 1; i < comm_sz; i++) {
-            MPI_Send(random_array + size * i, 
-            size, MPI_INT, i, 0, MPI_COMM_WORLD);
-        }
-    } else {
-        MPI_Recv(sub, size, MPI_INT, ROOT, 0, MPI_COMM_WORLD, &status);
-    }
+    scatterData(current_rank, size, comm_sz, random_array, sub);
 
 
     // Временный массив, который нужен для сортировки слиянием
