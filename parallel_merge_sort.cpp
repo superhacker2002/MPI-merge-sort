@@ -2,8 +2,9 @@
 #include <mpi.h>
 #include <random>
  
-constexpr int ARRAY_SIZE = 200;
+constexpr int ARRAY_SIZE = 10;
 constexpr int ROOT = 0;
+
 struct Parameters {
     int comm_sz;
     int current_rank;
@@ -86,7 +87,7 @@ void prepareData(Parameters& sort) {
     if (sort.current_rank == ROOT) {
         sort.random_array = new int[ARRAY_SIZE];
         fillArray(sort.random_array);
-        std::cout << "Random array:\n";
+        std::cout << "Массив с рандомными значениями:\n";
         printArray(sort.random_array);
     }
 }
@@ -96,7 +97,7 @@ void lastSort(int current_rank, int* result) {
     if (current_rank == ROOT) {
         int last_tmp[ARRAY_SIZE];
         mergeSort(result, last_tmp, 0, ARRAY_SIZE - 1);
-        std::cout << "Sorted array:\n";
+        std::cout << "Отсортированный массив:\n";
         printArray(result);
     }
 }
@@ -165,6 +166,14 @@ void makeSubArray(Parameters& sort) {
     sort.sub = new int[sort.sub_size];
 }
 
+void freeMemory(Parameters& sort) {
+    if (sort.current_rank == ROOT) {
+        delete sort.random_array;
+        delete sort.result;  
+    }
+    delete sort.sub;
+}
+
 int main(int argc, char **argv) {
     // Инициализация параллельной части программы
     MPI_Init(&argc, &argv);
@@ -192,6 +201,7 @@ int main(int argc, char **argv) {
     // записав в result
     gatherData(sort);
     lastSort(sort.current_rank, sort.result);
+    freeMemory(sort);
     MPI_Finalize();
     return 0;
 }
