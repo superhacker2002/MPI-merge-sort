@@ -2,8 +2,17 @@
 #include <mpi.h>
 #include <random>
  
-constexpr int MAX_SIZE = 10;
+constexpr int ARRAY_SIZE = 10;
 constexpr int ROOT = 0;
+struct Parameters {
+    int comm_sz;
+    int current_rank;
+    int* random_array;
+    int sub_size;
+    int remainder;
+    int* sub;
+    int* result;
+};
  
 void merge(int* a, int* b, int start, int middle, int end) {
     int na1, na2, nb, i;
@@ -52,90 +61,132 @@ int getRandomNumber() {
 }
 
 void fillArray(int *array) {
-    for (int i = 0; i < MAX_SIZE; ++i) {
+    for (int i = 0; i < ARRAY_SIZE; ++i) {
         array[i] = getRandomNumber();
     }
 }
 
 void printArray(const int *array) {
-    for (int i = 0; i < MAX_SIZE; ++i) {
+    for (int i = 0; i < ARRAY_SIZE; ++i) {
         std::cout << array[i] << " ";
     }
     std::cout << '\n';
 }
 
-void communicate(int* comm_sz, int* current_rank) {
+void communicate(Parameters& sort) {
     // Получение кол-ва процессов в стандартном коммуникаторе 
-    MPI_Comm_size(MPI_COMM_WORLD, comm_sz);
+    MPI_Comm_size(MPI_COMM_WORLD, &sort.comm_sz);
     // Получение ранга процесса в стандартном коммуникаторе. 
     // Как способ идентификации процесса для передачи ему какой-либо логики
-    MPI_Comm_rank(MPI_COMM_WORLD, current_rank);
+    MPI_Comm_rank(MPI_COMM_WORLD, &sort.current_rank);
 }
 
-void prepareData(int *random_array, int current_rank) {
+void prepareData(Parameters& sort) {
     // Если мы находимся на первом процессе, заполняем массив рандомными значениями
-    if (current_rank == ROOT) {
-        fillArray(random_array);
+    if (sort.current_rank == ROOT) {
+        sort.random_array = new int[ARRAY_SIZE];
+        fillArray(sort.random_array);
         std::cout << "Random array:\n";
-        printArray(random_array);
+        printArray(sort.random_array);
     }
 }
 
 void lastSort(int current_rank, int* result) {
     // Последний вызов сортировки
     if (current_rank == ROOT) {
-        int last_tmp[MAX_SIZE];
-        mergeSort(result, last_tmp, 0, MAX_SIZE - 1);
+        int last_tmp[ARRAY_SIZE];
+        mergeSort(result, last_tmp, 0, ARRAY_SIZE - 1);
         std::cout << "Sorted array:\n";
         printArray(result);
     }
 }
 
-void scatterData(int current_rank, int size, int comm_sz, int* random_array, int* sub) {
-    MPI_Status status;
-    if (current_rank == ROOT) {
-        for (int i = 0; i < size; i++) {
-            sub[i] = random_array[i];
+void scatterData(Parameters& sort) {
+    if (sort.current_rank == ROOT) {
+        // Для root процесса создаем подмассив отдельно, поскольку он не отправляет сам
+        // Себе данные для сорировки а выделяет себе первый кусок из рандомного массива
+        for (int i = 0; i < sort.sub_size; i++) {
+            sort.sub[i] = sort.random_array[i];
         }
-        for (int i = ROOT + 1; i < comm_sz; i++) {
-            MPI_Send(random_array + size * i, 
-            size, MPI_INT, i, 0, MPI_COMM_WORLD);
+        // Отправляем всем остальным процессами подмассивы
+        for (int i = ROOT + 1; i < sort.comm_sz; i++) {
+            int sub_size = sort.sub_size;
+            // Если кол-во чисел в массиве нечетное и мы хотим отправить данные последнему процессу
+            // То нам надо прислать кусок данных размером меньше, чем остальным процессам
+            if (sort.remainder && i == sort.comm_sz - 1) {
+                sub_size = sort.remainder;
+            }
+            MPI_Send(sort.random_array + sort.sub_size * i, sub_size, MPI_INT, i, 0, MPI_COMM_WORLD);
         }
+    // Все процессы должны получить свои подмассивы
     } else {
-        MPI_Recv(sub, size, MPI_INT, ROOT, 0, MPI_COMM_WORLD, &status);
+        MPI_Recv(sort.sub, sort.sub_size, MPI_INT, ROOT, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
+}
+
+void gatherData(Parameters& sort) {
+    // Каждый процесс должен выслать руту отсортированную часть массива
+    if (sort.current_rank != ROOT) {
+        MPI_Send(sort.sub, sort.sub_size, MPI_INT, ROOT, 0, MPI_COMM_WORLD);
+    // Root должен принять каждый кусок отсортированного массива в результирующий массив
+    } else if (sort.current_rank == ROOT) {
+        // То, что отсортировал root сразу добавляем в result
+        for (int i = 0; i < sort.sub_size; ++i) {
+            sort.result[i] = sort.sub[i];
+        }
+        // Принимаем массивы от всех остальных процессов
+        for (int i = 1; i < sort.comm_sz; i++) {
+            int sub_size = sort.sub_size;
+            if (sort.remainder && i == sort.comm_sz - 1) {
+                sub_size = sort.remainder;
+            }
+            MPI_Recv(sort.result + sort.sub_size * i, sub_size,
+                    MPI_INT, ROOT + i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    }
+}
+
+void makeSubArray(Parameters& sort) {
+    // Решаем, какого размера будут подмассивы, которые мы раздадим процессам для сортировки
+    sort.sub_size = ARRAY_SIZE / sort.comm_sz;
+    // Вычисляем, можно ли разделить массив на равные участки по кол-ву процессов
+    int remainder = ARRAY_SIZE % sort.comm_sz;
+    if (remainder) {
+        sort.sub_size += 1;
+        sort.remainder = ARRAY_SIZE % sort.sub_size;
+        if (sort.current_rank == sort.comm_sz - 1) {
+            sort.sub_size = sort.remainder;
+        }
+    }
+    // Выделяем память для куска массива, кторый будет отсортирован текущим процессом
+    sort.sub = new int[sort.sub_size];
 }
 
 int main(int argc, char **argv) {
     // Инициализация параллельной части программы
     MPI_Init(&argc, &argv);
-
-    int comm_sz;
-    int current_rank;
+    // Создаем структуру со всеми нужными параметрами для работы процесссов
+    Parameters sort;
     // Получаем кол-во процессов и ранг текущего процесса
-    communicate(&comm_sz, &current_rank);
-
-    int random_array[MAX_SIZE];
-    prepareData(random_array, current_rank);
-    // Заполняем и отсылаем массив (если мы на процессе root)
-    // с рандомными значениями всем процессам
-    int size = MAX_SIZE / comm_sz;
-    int sub[size];
-    scatterData(current_rank, size, comm_sz, random_array, sub);
-
+    communicate(sort);
+    // Создаем и заполняем массив случайными значениями
+    prepareData(sort);
+    // Подгатавливаем данные о массиве, который получит процесс для сорировки
+    makeSubArray(sort);
+    // Рассылаем данные для сортировки всем процессам
+    scatterData(sort);
 
     // Временный массив, который нужен для сортировки слиянием
-    int tmp[size];
-    mergeSort(sub, tmp, 0, size - 1);
+    int tmp[sort.sub_size];
+    mergeSort(sort.sub, tmp, 0, sort.sub_size - 1);
  
-    int *result;
-    if (current_rank == 0) {
+    if (sort.current_rank == 0) {
         // Память для массива, в который будет записан результат выполнения сортировки
-        result = new int[MAX_SIZE];  
+        sort.result = new int[ARRAY_SIZE];  
     }
     // Собрать все массивы, отсортированные процессами, в один 
-    MPI_Gather(sub, size, MPI_INT, result, size, MPI_INT, 0, MPI_COMM_WORLD);
-    lastSort(current_rank, result);
+    gatherData(sort);
+    lastSort(sort.current_rank, sort.result);
     MPI_Finalize();
     return 0;
 }
