@@ -2,7 +2,7 @@
 #include <mpi.h>
 #include <random>
  
-constexpr int ARRAY_SIZE = 10;
+constexpr int ARRAY_SIZE = 200;
 constexpr int ROOT = 0;
 struct Parameters {
     int comm_sz;
@@ -101,6 +101,7 @@ void lastSort(int current_rank, int* result) {
     }
 }
 
+// Аналог библиотечной функции MPI_Scatter
 void scatterData(Parameters& sort) {
     if (sort.current_rank == ROOT) {
         // Для root процесса создаем подмассив отдельно, поскольку он не отправляет сам
@@ -124,11 +125,12 @@ void scatterData(Parameters& sort) {
     }
 }
 
+// Аналог библиотечной функции MPI_Gather
 void gatherData(Parameters& sort) {
-    // Каждый процесс должен выслать руту отсортированную часть массива
+    // Каждый процесс высылает руту отсортированную часть массива
     if (sort.current_rank != ROOT) {
         MPI_Send(sort.sub, sort.sub_size, MPI_INT, ROOT, 0, MPI_COMM_WORLD);
-    // Root должен принять каждый кусок отсортированного массива в результирующий массив
+    // Рут принимает каждый кусок отсортированного массива в результирующий массив
     } else if (sort.current_rank == ROOT) {
         // То, что отсортировал root сразу добавляем в result
         for (int i = 0; i < sort.sub_size; ++i) {
@@ -151,7 +153,8 @@ void makeSubArray(Parameters& sort) {
     sort.sub_size = ARRAY_SIZE / sort.comm_sz;
     // Вычисляем, можно ли разделить массив на равные участки по кол-ву процессов
     int remainder = ARRAY_SIZE % sort.comm_sz;
-    if (remainder) {
+    sort.remainder = 0;
+    if (remainder) {  // если разделить поровну нельзя, то узнаем размер последнего отрезка
         sort.sub_size += 1;
         sort.remainder = ARRAY_SIZE % sort.sub_size;
         if (sort.current_rank == sort.comm_sz - 1) {
@@ -171,12 +174,13 @@ int main(int argc, char **argv) {
     communicate(sort);
     // Создаем и заполняем массив случайными значениями
     prepareData(sort);
-    // Подгатавливаем данные о массиве, который получит процесс для сорировки
+    // Подгатавливаем данные о массиве, который получит текущий процесс для сорировки
     makeSubArray(sort);
     // Рассылаем данные для сортировки всем процессам
     scatterData(sort);
 
-    // Временный массив, который нужен для сортировки слиянием
+    // Создаем ременный массив, который нужен для сортировки слиянием
+    // И сортируем кусок массива, который был прислан текущему процессу
     int tmp[sort.sub_size];
     mergeSort(sort.sub, tmp, 0, sort.sub_size - 1);
  
@@ -184,7 +188,8 @@ int main(int argc, char **argv) {
         // Память для массива, в который будет записан результат выполнения сортировки
         sort.result = new int[ARRAY_SIZE];  
     }
-    // Собрать все массивы, отсортированные процессами, в один 
+    // Собрать все массивы, отсортированные процессами и вернуть обратно руту,
+    // записав в result
     gatherData(sort);
     lastSort(sort.current_rank, sort.result);
     MPI_Finalize();
