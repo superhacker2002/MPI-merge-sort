@@ -13,7 +13,7 @@ constexpr int ROOT = 0;
 */
 void scatterData(ProcessData& process) {
     if (process.rank == ROOT) {
-        for (int i = 0; i < process.sub_array_size; i++) {
+        for (size_t i = 0; i < process.sub_array_size; i++) {
             process.sub_array.get()[i] = process.random_array.get()[i];
         }
         for (int i = ROOT + 1; i < process.comm_size; i++) {
@@ -37,7 +37,7 @@ void gatherData(ProcessData& process) {
     if (process.rank != ROOT) {
         MPI_Send(process.sub_array.get(), process.sub_array_size, MPI_INT, ROOT, 0, MPI_COMM_WORLD);
     } else if (process.rank == ROOT) {
-        for (int i = 0; i < process.sub_array_size; ++i) {
+        for (size_t i = 0; i < process.sub_array_size; ++i) {
             process.result.get()[i] = process.sub_array.get()[i];
         }
         for (int i = 1; i < process.comm_size; i++) {
