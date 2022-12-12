@@ -12,22 +12,20 @@ constexpr int ROOT = 0;
  * and every process gets it on its side by MPI_Recv.
 */
 void scatterData(ProcessData& process) {
-    int* sub_array = process.sub_array.get();
-    int* random_array = process.random_array.get();
     if (process.rank == ROOT) {
         for (int i = 0; i < process.sub_array_size; i++) {
-            sub_array[i] = random_array[i];
+            process.sub_array.get()[i] = process.random_array.get()[i];
         }
         for (int i = ROOT + 1; i < process.comm_size; i++) {
             int sub_array_size = process.sub_array_size;
             if (process.remainder && i == process.comm_size - 1) {
                 sub_array_size = process.remainder;
             }
-            MPI_Send(random_array + process.sub_array_size * i,
+            MPI_Send(process.random_array.get() + process.sub_array_size * i,
                     sub_array_size, MPI_INT, i, 0, MPI_COMM_WORLD);
         }
     } else {
-        MPI_Recv(sub_array, process.sub_array_size,MPI_INT,
+        MPI_Recv(process.sub_array.get(), process.sub_array_size,MPI_INT,
                 ROOT, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 }
@@ -39,11 +37,9 @@ void gatherData(ProcessData& process) {
     if (process.rank != ROOT) {
         MPI_Send(process.sub_array.get(), process.sub_array_size, MPI_INT, ROOT, 0, MPI_COMM_WORLD);
     } else if (process.rank == ROOT) {
-        // То, что отсортировал root сразу добавляем в result
         for (int i = 0; i < process.sub_array_size; ++i) {
             process.result.get()[i] = process.sub_array.get()[i];
         }
-        // Принимаем массивы от всех остальных процессов
         for (int i = 1; i < process.comm_size; i++) {
             int sub_array_size = process.sub_array_size;
             if (process.remainder && i == process.comm_size - 1) {
@@ -75,11 +71,11 @@ ProcessData getProcessData() {
     MPI_Comm_size(MPI_COMM_WORLD, &process.comm_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &process.rank);
     if (process.rank == ROOT) {
-        process.random_array = std::make_unique<int>(ARRAY_SIZE);
+        process.random_array = std::make_unique<int[]>(ARRAY_SIZE);
         array::fillRandomValues(process.random_array.get(), ARRAY_SIZE);
     }
     getSubArraySize(process);
-    process.sub_array = std::make_unique<int>(process.sub_array_size);
+    process.sub_array = std::make_unique<int[]>(process.sub_array_size);
     return process;
 }
 
@@ -97,7 +93,7 @@ int main(int argc, char **argv) {
     mergeSort(process.sub_array.get(), tmp, 0, process.sub_array_size - 1);
  
     if (process.rank == 0) {
-        process.result = std::make_unique<int>(ARRAY_SIZE);  
+        process.result = std::make_unique<int[]>(ARRAY_SIZE);  
     }
 
     // Get sorted data (by each process) in the result vector

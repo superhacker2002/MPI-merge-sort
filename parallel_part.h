@@ -1,16 +1,15 @@
 #ifndef PARALLEL_MERGE_SORT_H_
 #define PARALLEL_MERGE_SORT_H_
 #include <memory>
-#include <vector>
 
 struct ProcessData {
     int comm_size;
     int rank;
-    std::unique_ptr<int> random_array;
+    std::unique_ptr<int[]> random_array;
     size_t sub_array_size;
     int remainder;
-    std::unique_ptr<int> sub_array;
-    std::unique_ptr<int> result;
+    std::unique_ptr<int[]> sub_array;
+    std::unique_ptr<int[]> result;
 };
 
 ProcessData getProccessData();
